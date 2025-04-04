@@ -1,4 +1,4 @@
-// app/page.jsx
+// app/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -20,13 +20,20 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+// Define types for participants
+interface Participant {
+  id: string;
+  name: string;
+  score: number;
+}
+
 export default function Leaderboard() {
-  const [participants, setParticipants] = useState([]);
-  const [newParticipant, setNewParticipant] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [participantToDelete, setParticipantToDelete] = useState(null);
-  const [useDatabase, setUseDatabase] = useState(false);
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [newParticipant, setNewParticipant] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [participantToDelete, setParticipantToDelete] = useState<Participant | null>(null);
+  const [useDatabase, setUseDatabase] = useState<boolean>(false);
 
   // Load participants from localStorage or API on component mount
   useEffect(() => {
@@ -42,13 +49,13 @@ export default function Leaderboard() {
           // Load from API
           const response = await fetch("/api/participants");
           if (!response.ok) throw new Error("Failed to load participants");
-          const data = await response.json();
+          const data = await response.json() as Participant[];
           setParticipants(data);
         } else {
           // Load from localStorage
           const savedParticipants = localStorage.getItem("leaderboardParticipants");
           if (savedParticipants) {
-            setParticipants(JSON.parse(savedParticipants));
+            setParticipants(JSON.parse(savedParticipants) as Participant[]);
           }
         }
       } catch (error) {
@@ -57,7 +64,7 @@ export default function Leaderboard() {
         // Fallback to localStorage
         const savedParticipants = localStorage.getItem("leaderboardParticipants");
         if (savedParticipants) {
-          setParticipants(JSON.parse(savedParticipants));
+          setParticipants(JSON.parse(savedParticipants) as Participant[]);
         }
         setUseDatabase(false);
       } finally {
@@ -66,7 +73,7 @@ export default function Leaderboard() {
     };
 
     loadParticipants();
-  }, [toast]);
+  }, []);
 
   // Save participants to localStorage whenever they change
   useEffect(() => {
@@ -80,7 +87,7 @@ export default function Leaderboard() {
     setUseDatabase(newMode);
     localStorage.setItem("useDatabase", String(newMode));
     
-    toast.error("Failed to load participants. Using local storage instead.");
+    toast.success("Storage mode changed. Reloading data...");
     
     // Reload the page to refresh data from the correct source
     window.location.reload();
@@ -88,7 +95,7 @@ export default function Leaderboard() {
 
   const handleAddParticipant = async () => {
     if (newParticipant.trim() === "") {
-      toast.error("Failed to load participants. Using local storage instead.");
+      toast.error("Participant name cannot be empty");
       return;
     }
 
@@ -97,7 +104,7 @@ export default function Leaderboard() {
     );
 
     if (participantExists) {
-      toast.error("Failed to load participants. Using local storage instead.");
+      toast.error("Participant already exists");
       return;
     }
 
@@ -112,16 +119,16 @@ export default function Leaderboard() {
         });
 
         if (!response.ok) throw new Error("Failed to add participant");
-        const newParticipantData = await response.json();
+        const newParticipantData = await response.json() as Participant;
         
         // Fetch updated list to ensure correct sorting
         const updatedResponse = await fetch("/api/participants");
         if (!updatedResponse.ok) throw new Error("Failed to refresh participants");
-        const updatedData = await updatedResponse.json();
+        const updatedData = await updatedResponse.json() as Participant[];
         setParticipants(updatedData);
       } else {
         // Add participant locally
-        const newParticipantObj = {
+        const newParticipantObj: Participant = {
           id: Date.now().toString(),
           name: newParticipant,
           score: 0,
@@ -130,16 +137,16 @@ export default function Leaderboard() {
       }
 
       setNewParticipant("");
-      toast.success("success to load participants. Using local storage instead.");
+      toast.success("Participant added successfully");
     } catch (error) {
       console.error("Error adding participant:", error);
-      toast.error("Failed to load participants. Using local storage instead.");
+      toast.error("Failed to add participant");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleScoreChange = async (id, delta) => {
+  const handleScoreChange = async (id: string, delta: number) => {
     try {
       const participant = participants.find(p => p.id === id);
       if (!participant) return;
@@ -147,7 +154,7 @@ export default function Leaderboard() {
       const newScore = participant.score + delta;
       // Prevent negative scores
       if (newScore < 0) {
-        toast.error("score cannot be negative.");
+        toast.error("Score cannot be negative");
         return;
       }
 
@@ -165,7 +172,7 @@ export default function Leaderboard() {
         // Fetch updated list to ensure correct sorting
         const updatedResponse = await fetch("/api/participants");
         if (!updatedResponse.ok) throw new Error("Failed to refresh participants");
-        const updatedData = await updatedResponse.json();
+        const updatedData = await updatedResponse.json() as Participant[];
         setParticipants(updatedData);
       } else {
         // Update score locally
@@ -180,13 +187,13 @@ export default function Leaderboard() {
       }
     } catch (error) {
       console.error("Error updating score:", error);
-      toast.error("Failed to updated score.");
+      toast.error("Failed to update score");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const confirmDelete = (participant) => {
+  const confirmDelete = (participant: Participant) => {
     setParticipantToDelete(participant);
   };
 
@@ -206,17 +213,17 @@ export default function Leaderboard() {
         // Fetch updated list
         const updatedResponse = await fetch("/api/participants");
         if (!updatedResponse.ok) throw new Error("Failed to refresh participants");
-        const updatedData = await updatedResponse.json();
+        const updatedData = await updatedResponse.json() as Participant[];
         setParticipants(updatedData);
       } else {
         // Remove participant locally
         setParticipants(participants.filter((p) => p.id !== participantToDelete.id));
       }
 
-      toast.error("Failed to load participants. Using local storage instead.");
+      toast.success(`${participantToDelete.name} removed successfully`);
     } catch (error) {
       console.error("Error removing participant:", error);
-      toast.error("Failed to load participants. Using local storage instead.");
+      toast.error("Failed to remove participant");
     } finally {
       setIsSaving(false);
       setParticipantToDelete(null);
