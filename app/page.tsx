@@ -1,102 +1,414 @@
-import Image from "next/image";
+// app/page.jsx
+"use client";
 
-export default function Home() {
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Plus, Minus, Trophy, UserPlus, Save, Loader2, Trash2 } from "lucide-react";
+import { toast } from "sonner"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+export default function Leaderboard() {
+  const [participants, setParticipants] = useState([]);
+  const [newParticipant, setNewParticipant] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [participantToDelete, setParticipantToDelete] = useState(null);
+  const [useDatabase, setUseDatabase] = useState(false);
+
+  // Load participants from localStorage or API on component mount
+  useEffect(() => {
+    const loadParticipants = async () => {
+      setIsLoading(true);
+      try {
+        // Check if we should use the database
+        const dbPreference = localStorage.getItem("useDatabase");
+        const shouldUseDb = dbPreference === "true";
+        setUseDatabase(shouldUseDb);
+
+        if (shouldUseDb) {
+          // Load from API
+          const response = await fetch("/api/participants");
+          if (!response.ok) throw new Error("Failed to load participants");
+          const data = await response.json();
+          setParticipants(data);
+        } else {
+          // Load from localStorage
+          const savedParticipants = localStorage.getItem("leaderboardParticipants");
+          if (savedParticipants) {
+            setParticipants(JSON.parse(savedParticipants));
+          }
+        }
+      } catch (error) {
+        console.error("Error loading participants:", error);
+        toast.error("Failed to load participants. Using local storage instead.");
+        // Fallback to localStorage
+        const savedParticipants = localStorage.getItem("leaderboardParticipants");
+        if (savedParticipants) {
+          setParticipants(JSON.parse(savedParticipants));
+        }
+        setUseDatabase(false);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadParticipants();
+  }, [toast]);
+
+  // Save participants to localStorage whenever they change
+  useEffect(() => {
+    if (!isLoading && !useDatabase) {
+      localStorage.setItem("leaderboardParticipants", JSON.stringify(participants));
+    }
+  }, [participants, isLoading, useDatabase]);
+
+  const toggleDatabaseMode = () => {
+    const newMode = !useDatabase;
+    setUseDatabase(newMode);
+    localStorage.setItem("useDatabase", String(newMode));
+    
+    toast.error("Failed to load participants. Using local storage instead.");
+    
+    // Reload the page to refresh data from the correct source
+    window.location.reload();
+  };
+
+  const handleAddParticipant = async () => {
+    if (newParticipant.trim() === "") {
+      toast.error("Failed to load participants. Using local storage instead.");
+      return;
+    }
+
+    const participantExists = participants.some(
+      (p) => p.name.toLowerCase() === newParticipant.toLowerCase()
+    );
+
+    if (participantExists) {
+      toast.error("Failed to load participants. Using local storage instead.");
+      return;
+    }
+
+    try {
+      if (useDatabase) {
+        setIsSaving(true);
+        // Add participant through API
+        const response = await fetch("/api/participants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newParticipant }),
+        });
+
+        if (!response.ok) throw new Error("Failed to add participant");
+        const newParticipantData = await response.json();
+        
+        // Fetch updated list to ensure correct sorting
+        const updatedResponse = await fetch("/api/participants");
+        if (!updatedResponse.ok) throw new Error("Failed to refresh participants");
+        const updatedData = await updatedResponse.json();
+        setParticipants(updatedData);
+      } else {
+        // Add participant locally
+        const newParticipantObj = {
+          id: Date.now().toString(),
+          name: newParticipant,
+          score: 0,
+        };
+        setParticipants([...participants, newParticipantObj].sort((a, b) => b.score - a.score));
+      }
+
+      setNewParticipant("");
+      toast.success("success to load participants. Using local storage instead.");
+    } catch (error) {
+      console.error("Error adding participant:", error);
+      toast.error("Failed to load participants. Using local storage instead.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleScoreChange = async (id, delta) => {
+    try {
+      const participant = participants.find(p => p.id === id);
+      if (!participant) return;
+
+      const newScore = participant.score + delta;
+      // Prevent negative scores
+      if (newScore < 0) {
+        toast.error("score cannot be negative.");
+        return;
+      }
+
+      if (useDatabase) {
+        setIsSaving(true);
+        // Update score through API
+        const response = await fetch(`/api/participants/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ score: newScore }),
+        });
+
+        if (!response.ok) throw new Error("Failed to update score");
+        
+        // Fetch updated list to ensure correct sorting
+        const updatedResponse = await fetch("/api/participants");
+        if (!updatedResponse.ok) throw new Error("Failed to refresh participants");
+        const updatedData = await updatedResponse.json();
+        setParticipants(updatedData);
+      } else {
+        // Update score locally
+        const updatedParticipants = participants.map((p) => {
+          if (p.id === id) {
+            return { ...p, score: newScore };
+          }
+          return p;
+        });
+        // Sort participants by score (highest first)
+        setParticipants([...updatedParticipants].sort((a, b) => b.score - a.score));
+      }
+    } catch (error) {
+      console.error("Error updating score:", error);
+      toast.error("Failed to updated score.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const confirmDelete = (participant) => {
+    setParticipantToDelete(participant);
+  };
+
+  const handleRemoveParticipant = async () => {
+    if (!participantToDelete) return;
+    
+    try {
+      if (useDatabase) {
+        setIsSaving(true);
+        // Remove participant through API
+        const response = await fetch(`/api/participants/${participantToDelete.id}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) throw new Error("Failed to remove participant");
+        
+        // Fetch updated list
+        const updatedResponse = await fetch("/api/participants");
+        if (!updatedResponse.ok) throw new Error("Failed to refresh participants");
+        const updatedData = await updatedResponse.json();
+        setParticipants(updatedData);
+      } else {
+        // Remove participant locally
+        setParticipants(participants.filter((p) => p.id !== participantToDelete.id));
+      }
+
+      toast.error("Failed to load participants. Using local storage instead.");
+    } catch (error) {
+      console.error("Error removing participant:", error);
+      toast.error("Failed to load participants. Using local storage instead.");
+    } finally {
+      setIsSaving(false);
+      setParticipantToDelete(null);
+    }
+  };
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="container mx-auto py-8 px-4">      
+      <AlertDialog open={!!participantToDelete} onOpenChange={() => setParticipantToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Participant</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove {participantToDelete?.name}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRemoveParticipant} className="bg-red-600 hover:bg-red-700">
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
+        <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-2xl md:text-3xl font-bold text-indigo-800 flex items-center">
+                <Trophy className="h-6 w-6 mr-2 text-yellow-500" /> Leaderboard
+              </CardTitle>
+              <CardDescription>
+                {useDatabase ? "Using database storage" : "Using local browser storage"}
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              onClick={toggleDatabaseMode}
+            >
+              {useDatabase ? "Use Local Storage" : "Use Database"}
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col space-y-6">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Add new participant..."
+                  value={newParticipant}
+                  onChange={(e) => setNewParticipant(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddParticipant()}
+                  className="border-indigo-200 focus:border-indigo-400"
+                  disabled={isSaving}
+                />
+                <Button
+                  onClick={handleAddParticipant}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                  disabled={isSaving}
+                >
+                  {isSaving ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <UserPlus className="h-4 w-4 mr-2" />
+                  )}
+                  Add
+                </Button>
+              </div>
+
+              <div className="rounded-lg border bg-white overflow-hidden">
+                <div className="grid grid-cols-12 gap-2 p-4 bg-indigo-100 font-medium text-indigo-900">
+                  <div className="col-span-1 text-center">#</div>
+                  <div className="col-span-5">Name</div>
+                  <div className="col-span-2 text-center">Score</div>
+                  <div className="col-span-4 text-center">Actions</div>
+                </div>
+
+                {isLoading ? (
+                  <div className="p-12 flex justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+                  </div>
+                ) : (
+                  <AnimatePresence>
+                    {participants.length === 0 ? (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="p-8 text-center text-gray-500"
+                      >
+                        No participants yet. Add your first one!
+                      </motion.div>
+                    ) : (
+                      participants.map((participant, index) => (
+                        <motion.div
+                          key={participant.id}
+                          layout
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          transition={{
+                            type: "spring",
+                            stiffness: 500,
+                            damping: 30,
+                            mass: 1,
+                          }}
+                          className={`grid grid-cols-12 gap-2 p-4 items-center ${
+                            index % 2 === 0 ? "bg-white" : "bg-gray-50"
+                          } ${index === 0 ? "bg-gradient-to-r from-yellow-50 to-yellow-100" : ""}`}
+                        >
+                          <div className="col-span-1 text-center font-medium">
+                            {index === 0 ? (
+                              <Trophy className="h-5 w-5 text-yellow-500 mx-auto" />
+                            ) : (
+                              index + 1
+                            )}
+                          </div>
+                          <div className="col-span-5 font-medium">
+                            {participant.name}
+                          </div>
+                          <motion.div
+                            key={`score-${participant.id}-${participant.score}`}
+                            initial={{ scale: 1.5 }}
+                            animate={{ scale: 1 }}
+                            className="col-span-2 text-center font-bold text-indigo-700"
+                          >
+                            {participant.score}
+                          </motion.div>
+                          <div className="col-span-4 flex justify-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-green-500 text-green-600 hover:bg-green-50"
+                              onClick={() => handleScoreChange(participant.id, 1)}
+                              disabled={isSaving}
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-amber-500 text-amber-600 hover:bg-amber-50"
+                              onClick={() => handleScoreChange(participant.id, -1)}
+                              disabled={isSaving || participant.score <= 0}
+                            >
+                              <Minus className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-red-500 text-red-600 hover:bg-red-50"
+                              onClick={() => confirmDelete(participant)}
+                              disabled={isSaving}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </motion.div>
+                      ))
+                    )}
+                  </AnimatePresence>
+                )}
+              </div>
+              
+              {participants.length > 0 && (
+                <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg">
+                  <div className="text-indigo-800">
+                    <span className="font-medium">{participants.length}</span> participants
+                  </div>
+                  <div className="text-indigo-800">
+                    Total points: <span className="font-medium">
+                      {participants.reduce((sum, p) => sum + p.score, 0)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+      
+      <footer className="mt-8 text-center text-gray-500 text-sm">
+        <p>Interactive leaderboard with real-time updates.</p>
+        <p className="mt-1">
+          {useDatabase 
+            ? "Data is stored in the database and synchronized across all devices." 
+            : "Data is stored in this browser only. Clear your browser data to reset."}
+        </p>
       </footer>
     </div>
   );
